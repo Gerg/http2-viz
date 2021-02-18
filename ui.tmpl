@@ -5,14 +5,17 @@
   </head>
   <body>
     <dl>
-      <dt>Response Code</dt>
+      <dt>Proxy Request Protocol</dt>
+      <dd>{{ .ProxyResponse.RequestProtocol }}</dd>
+
+      <dt>Server Request Protocol</dt>
+      <dd>{{ .ServerResponse.RequestProtocol }}</dd>
+
+      <dt>Client Response Code</dt>
       <dd>{{ .ResponseCode }}</dd>
 
-      <dt>Response Protocol</dt>
+      <dt>Client Response Protocol</dt>
       <dd>{{ .ResponseProtocol }}</dd>
-
-      <dt>Response Body</dt>
-      <dd>{{ .ResponseBody }}</dd>
     </dl>
   </body>
 </html>

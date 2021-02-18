@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -24,6 +25,11 @@ const clientPort = ":8002"
 const uiPort = ":8003"
 
 const uiTemplateFile = "ui.tmpl"
+const responseBoundary = "~~boundary~~"
+
+type startable interface {
+	start(*sync.WaitGroup)
+}
 
 type Http2Server struct{ Port string }
 type ErrorHandler struct{ Prefix string }
@@ -47,8 +53,19 @@ type Server struct {
 	ErrorHandler
 }
 
-type startable interface {
-	start(*sync.WaitGroup)
+type ClientResponse struct {
+	ResponseCode     string         `json:"code"`
+	ResponseProtocol string         `json:"protocol"`
+	ProxyResponse    ProxyResponse  `json:"proxy_response"`
+	ServerResponse   ServerResponse `json:"server_response"`
+}
+
+type ProxyResponse struct {
+	RequestProtocol string `json:"protocol"`
+}
+
+type ServerResponse struct {
+	RequestProtocol string `json:"protocol"`
 }
 
 func main() {
@@ -91,12 +108,6 @@ func (this Ui) start(waitGroup *sync.WaitGroup) {
 	this.ErrorHandler.handleErr(err, "http2server crashed")
 }
 
-type Http2VizResponse struct {
-	ResponseCode     string `json:"code"`
-	ResponseProtocol string `json:"protocol"`
-	ResponseBody     string `json:"body"`
-}
-
 func (this Ui) handle(w http.ResponseWriter, r *http.Request) {
 	var err error
 	templateName := path.Base(uiTemplateFile)
@@ -105,7 +116,7 @@ func (this Ui) handle(w http.ResponseWriter, r *http.Request) {
 	url := fmt.Sprintf("http://localhost%s", this.ClientPort)
 	response := this.makeRequest(url)
 
-	var vizResponse Http2VizResponse
+	var vizResponse ClientResponse
 	err = json.Unmarshal(response, &vizResponse)
 
 	this.ErrorHandler.handleErr(err, "error unmarshalling client response")
@@ -138,35 +149,49 @@ func (this Client) start(waitGroup *sync.WaitGroup) {
 
 func (this Client) handle(w http.ResponseWriter, r *http.Request) {
 	url := fmt.Sprintf("https://localhost%s", this.ProxyPort)
-	response := this.makeRequest(url)
-	fmt.Fprint(w, string(response))
+	proxyResponse := this.makeRequest(url)
+
+	defer proxyResponse.Body.Close()
+
+	body, err := ioutil.ReadAll(proxyResponse.Body)
+	this.ErrorHandler.handleErr(err, "failed reading proxy response body")
+
+	splitResponses := bytes.Split(body, []byte(responseBoundary))
+	proxyResponseBody, serverResponseBody := splitResponses[0], splitResponses[1]
+
+	var parsedProxyResponse ProxyResponse
+	var parsedServerResponse ServerResponse
+
+	err = json.Unmarshal(proxyResponseBody, &parsedProxyResponse)
+	this.ErrorHandler.handleErr(err, "failed unmarshalling proxy response")
+
+	err = json.Unmarshal(serverResponseBody, &parsedServerResponse)
+	this.ErrorHandler.handleErr(err, "failed unmarshalling server response")
+
+	response := ClientResponse{
+		ResponseProtocol: proxyResponse.Proto,
+		ResponseCode:     strconv.Itoa(proxyResponse.StatusCode),
+		ProxyResponse:    parsedProxyResponse,
+		ServerResponse:   parsedServerResponse,
+	}
+
+	jsonResponse, err := json.Marshal(response)
+	this.ErrorHandler.handleErr(err, "failed jsonifying client response")
+
+	fmt.Fprint(w, string(jsonResponse))
 }
 
-func (this Client) makeRequest(url string) string {
+func (this Client) makeRequest(url string) *http.Response {
 	client := &http.Client{}
 	transport, err := buildTlsTransport()
 	this.ErrorHandler.handleErr(err, "failed building TLS transport")
 
 	client.Transport = transport
 
-	resp, err := client.Get(url)
+	response, err := client.Get(url)
 	this.ErrorHandler.handleErr(err, "failed GET to proxy")
 
-	defer resp.Body.Close()
-
-	body, err := ioutil.ReadAll(resp.Body)
-	this.ErrorHandler.handleErr(err, "failed reading proxy response body")
-
-	response := map[string]string{
-		"code":     strconv.Itoa(resp.StatusCode),
-		"protocol": resp.Proto,
-		"body":     string(body),
-	}
-
-	stringifiedResponse, err := json.Marshal(response)
-	this.ErrorHandler.handleErr(err, "failed jsonifying proxy response")
-
-	return string(stringifiedResponse)
+	return response
 }
 
 func (this Proxy) start(waitGroup *sync.WaitGroup) {
@@ -177,7 +202,14 @@ func (this Proxy) start(waitGroup *sync.WaitGroup) {
 }
 
 func (this Proxy) handle(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Proxy request protocol: %s\n", r.Proto)
+	response := ProxyResponse{
+		RequestProtocol: r.Proto,
+	}
+	jsonResponse, err := json.Marshal(response)
+	this.ErrorHandler.handleErr(err, "failed jsonifying proxy response")
+
+	fmt.Fprint(w, string(jsonResponse))
+	fmt.Fprint(w, responseBoundary)
 
 	origin, _ := url.Parse(fmt.Sprintf("http://localhost%s", this.ServerPort))
 
@@ -205,7 +237,13 @@ func (this Server) start(waitGroup *sync.WaitGroup) {
 }
 
 func (this Server) handle(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Server request protocol: %s\n", r.Proto)
+	response := ServerResponse{
+		RequestProtocol: r.Proto,
+	}
+	jsonResponse, err := json.Marshal(response)
+	this.ErrorHandler.handleErr(err, "failed jsonifying server response")
+
+	fmt.Fprint(w, string(jsonResponse))
 }
 
 func (this Http2Server) serveHttp(name string, handler http.HandlerFunc, tls bool) (err error) {
