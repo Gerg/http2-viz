@@ -2,6 +2,7 @@
 <html>
   <head>
     <title>HTTP/2 Viz</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Ctext%20x='0'%20y='14'%3E🌐%3C/text%3E%3C/svg%3E" type="image/svg+xml" />
     <style type="text/css">
       :root {
         --arrow-width: 40px;
@@ -60,41 +61,44 @@
       dt {
         font-weight: bold;
       }
-
     </style>
   </head>
   <body>
     <div class="container">
       <div class="column client">
-        Client
+        <h2>Client</h2>
+        <div>
+          <input type="checkbox" id="client-http2" name="client-http2" {{ if .ClientUseHTTP2 }} checked {{ end }} />
+          <label for="client-http2">HTTP/2</label>
+        </div>
       </div>
       <div class="column connection">
         <div class="stream">
           <h4>Client Request</h4>
           <dl>
             <dt>Protocol</dt>
-            <dd>{{ .ProxyResponse.RequestProtocol }}</dd>
+            <dd>{{ .ClientResponse.ProxyResponse.RequestProtocol }}</dd>
           </dl>
         </div>
         <div class="stream stream-reversed">
           <h4>Proxy Response</h4>
           <dl>
             <dt>Protocol</dt>
-            <dd>{{ .ResponseProtocol }}</dd>
+            <dd>{{ .ClientResponse.ResponseProtocol }}</dd>
             <dt>Code</dt>
-            <dd>{{ .ResponseCode }}</dd>
+            <dd>{{ .ClientResponse.ResponseCode }}</dd>
           </dl>
         </div>
       </div>
       <div class="column proxy">
-        Proxy
+        <h2>Proxy</h2>
       </div>
       <div class="column connection">
         <div class="stream">
           <h4>Proxy Request</h4>
           <dl>
             <dt>Protocol</dt>
-            <dd>{{ .ServerResponse.RequestProtocol }}</dd>
+            <dd>{{ .ClientResponse.ServerResponse.RequestProtocol }}</dd>
           </dl>
         </div>
         <div class="stream stream-reversed">
@@ -102,8 +106,15 @@
         </div>
       </div>
       <div class="column server">
-        Server
+        <h2>Server</h2>
       </div>
     </div>
   </body>
+  <script type="application/javascript">
+    const searchParams = new URLSearchParams(window.location.search);
+    document.querySelector('input#client-http2').addEventListener('click', (e) => {
+      searchParams.set('client-http2', e.target.checked);
+      window.location.search = searchParams.toString();
+    });
+  </script>
 </html>
