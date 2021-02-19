@@ -70,7 +70,7 @@
         <h2>Client</h2>
         <div>
           <input type="checkbox" id="client-http2" name="client-http2" {{ if .ClientUseHTTP2 }} checked {{ end }} />
-          <label for="client-http2">HTTP/2</label>
+          <label for="client-http2">Request HTTP/2</label>
         </div>
       </div>
       <div class="column connection">
@@ -93,6 +93,10 @@
       </div>
       <div class="column proxy">
         <h2>Proxy</h2>
+        <div>
+          <input type="checkbox" id="proxy-http2" name="proxy-http2" {{ if .ProxyUseHTTP2 }} checked {{ end }} />
+          <label for="proxy-http2">Request HTTP/2</label>
+        </div>
       </div>
       <div class="column connection">
         <div class="stream">
@@ -113,9 +117,12 @@
   </body>
   <script type="application/javascript">
     const searchParams = new URLSearchParams(window.location.search);
-    document.querySelector('input#client-http2').addEventListener('click', (e) => {
-      searchParams.set('client-http2', e.target.checked);
+    const handleCheck = (e) => {
+      target = e.target.name
+      searchParams.set(target, e.target.checked);
       window.location.search = searchParams.toString();
-    });
+    };
+    document.querySelector('input#client-http2').addEventListener('click', handleCheck);
+    document.querySelector('input#proxy-http2').addEventListener('click', handleCheck);
   </script>
 </html>

@@ -26,20 +26,24 @@ type startable interface {
 type Http2Server struct{ Port string }
 type ErrorHandler struct{ Prefix string }
 type TransportFactory struct{}
+type ConfigurationParser struct{}
 type HttpVersion string
 
 type Ui struct {
 	ClientPort string
+	ConfigurationParser
 	ErrorHandler
 	Http2Server
 }
 type Client struct {
+	ConfigurationParser
 	ErrorHandler
 	Http2Server
 	ProxyPort string
 	TransportFactory
 }
 type Proxy struct {
+	ConfigurationParser
 	ErrorHandler
 	Http2Server
 	ServerPort string
@@ -67,11 +71,13 @@ type ServerResponse struct {
 
 type Configuration struct {
 	ClientUseHttp2 bool
+	ProxyUseHttp2  bool
 }
 
 type ViewData struct {
 	ClientResponse
 	ClientUseHTTP2 bool
+	ProxyUseHTTP2  bool
 }
 
 const (
@@ -91,21 +97,24 @@ func main() {
 	waitGroup := sync.WaitGroup{}
 
 	ui := Ui{
-		ClientPort:   clientPort,
-		ErrorHandler: ErrorHandler{Prefix: "UI"},
-		Http2Server:  Http2Server{Port: uiPort},
+		ClientPort:          clientPort,
+		ConfigurationParser: ConfigurationParser{},
+		ErrorHandler:        ErrorHandler{Prefix: "UI"},
+		Http2Server:         Http2Server{Port: uiPort},
 	}
 	client := Client{
-		ErrorHandler:     ErrorHandler{Prefix: "Client"},
-		Http2Server:      Http2Server{Port: clientPort},
-		ProxyPort:        proxyPort,
-		TransportFactory: TransportFactory{},
+		ConfigurationParser: ConfigurationParser{},
+		ErrorHandler:        ErrorHandler{Prefix: "Client"},
+		Http2Server:         Http2Server{Port: clientPort},
+		ProxyPort:           proxyPort,
+		TransportFactory:    TransportFactory{},
 	}
 	proxy := Proxy{
-		ErrorHandler:     ErrorHandler{Prefix: "Proxy"},
-		Http2Server:      Http2Server{Port: proxyPort},
-		ServerPort:       serverPort,
-		TransportFactory: TransportFactory{},
+		ConfigurationParser: ConfigurationParser{},
+		ErrorHandler:        ErrorHandler{Prefix: "Proxy"},
+		Http2Server:         Http2Server{Port: proxyPort},
+		ServerPort:          serverPort,
+		TransportFactory:    TransportFactory{},
 	}
 	server := Server{
 		ErrorHandler: ErrorHandler{Prefix: "Server"},
@@ -137,28 +146,20 @@ func (this Ui) handle(w http.ResponseWriter, r *http.Request) {
 		RawQuery: r.URL.RawQuery,
 	}
 
-	configuration := this.parseQuery(r)
 	response := this.makeRequest(clientUrl.String())
 
 	var clientResponse ClientResponse
 	err := json.Unmarshal(response, &clientResponse)
 	this.ErrorHandler.HandleErr(err, "error unmarshalling client response")
 
+	configuration := this.ConfigurationParser.Parse(r)
 	viewData := ViewData{
 		ClientResponse: clientResponse,
 		ClientUseHTTP2: configuration.ClientUseHttp2,
+		ProxyUseHTTP2:  configuration.ProxyUseHttp2,
 	}
 
 	this.renderTemplate(w, viewData)
-}
-
-func (this Ui) parseQuery(r *http.Request) Configuration {
-	clientHttp2Param, ok := r.URL.Query()["client-http2"]
-	useHttp2 := ok && (clientHttp2Param[0] == "true")
-
-	return Configuration{
-		ClientUseHttp2: useHttp2,
-	}
 }
 
 func (this Ui) renderTemplate(w http.ResponseWriter, viewData ViewData) {
@@ -191,9 +192,15 @@ func (this Client) Start(waitGroup *sync.WaitGroup) {
 }
 
 func (this Client) handle(w http.ResponseWriter, r *http.Request) {
-	url := fmt.Sprintf("https://localhost%s", this.ProxyPort)
-	configuration := this.parseQuery(r)
-	proxyResponse := this.makeRequest(url, configuration.ClientUseHttp2)
+	proxyHost := fmt.Sprintf("localhost%s", this.ProxyPort)
+	proxyUrl := url.URL{
+		Scheme:   "https",
+		Host:     proxyHost,
+		RawQuery: r.URL.RawQuery,
+	}
+
+	configuration := this.ConfigurationParser.Parse(r)
+	proxyResponse := this.makeRequest(proxyUrl.String(), configuration.ClientUseHttp2)
 
 	parsedProxyResponse, parsedServerResponse := this.parseResponse(proxyResponse)
 
@@ -208,15 +215,6 @@ func (this Client) handle(w http.ResponseWriter, r *http.Request) {
 	this.ErrorHandler.HandleErr(err, "failed jsonifying client response")
 
 	fmt.Fprint(w, string(jsonResponse))
-}
-
-func (this Client) parseQuery(r *http.Request) Configuration {
-	clientHttp2Param, ok := r.URL.Query()["client-http2"]
-	useHttp2 := ok && (clientHttp2Param[0] == "true")
-
-	return Configuration{
-		ClientUseHttp2: useHttp2,
-	}
 }
 
 func (this Client) makeRequest(url string, useHttp2 bool) *http.Response {
@@ -289,8 +287,18 @@ func (this Proxy) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	proxy := &httputil.ReverseProxy{Director: director}
-	transport, err := this.TransportFactory.BuildHttp2Transport()
-	this.ErrorHandler.HandleErr(err, "failed building TLS transport")
+
+	configuration := this.ConfigurationParser.Parse(r)
+
+	var transport http.RoundTripper
+
+	if configuration.ProxyUseHttp2 {
+		transport, err = this.TransportFactory.BuildHttp2Transport()
+		this.ErrorHandler.HandleErr(err, "failed building HTTP2 transport")
+	} else {
+		transport, err = this.TransportFactory.BuildHttp1Transport()
+		this.ErrorHandler.HandleErr(err, "failed building HTTP1 transport")
+	}
 
 	proxy.Transport = transport
 
@@ -369,5 +377,18 @@ func (this TransportFactory) buildTransport(httpVersion HttpVersion) (http.Round
 func (this ErrorHandler) HandleErr(err error, errorMessage string) {
 	if err != nil {
 		log.Fatalf("%s: %s: %s", this.Prefix, errorMessage, err)
+	}
+}
+
+func (this ConfigurationParser) Parse(r *http.Request) Configuration {
+	clientHttp2Param, ok := r.URL.Query()["client-http2"]
+	clientUseHttp2 := ok && (clientHttp2Param[0] == "true")
+
+	proxyHttp2Param, ok := r.URL.Query()["proxy-http2"]
+	proxyUseHttp2 := ok && (proxyHttp2Param[0] == "true")
+
+	return Configuration{
+		ClientUseHttp2: clientUseHttp2,
+		ProxyUseHttp2:  proxyUseHttp2,
 	}
 }
