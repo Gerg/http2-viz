@@ -2,20 +2,108 @@
 <html>
   <head>
     <title>HTTP/2 Viz</title>
+    <style type="text/css">
+      :root {
+        --arrow-width: 40px;
+        --arrow-depth: calc(0% + var(--arrow-width));
+        --reverse-arrow-depth: calc(100% - var(--arrow-depth));
+        --crystal: #acddde;
+        --aero-blue: #caf1de;
+        --nyanza: #e1f8dc;
+        --cornsilk: #fef8dd;
+        --bisque: #ffe7c7;
+        --sandy-tan: #f7d8ba;
+      }
+
+      body {
+        font-family: sans-serif;
+      }
+
+      .container {
+        display: flex;
+        flex-direction: row;
+      }
+
+      .column {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+      }
+
+      .client, .proxy, .server {
+        align-items: center;
+        background-color: var(--sandy-tan);
+        flex: 1;
+        justify-content: center;
+      }
+
+      .connection {
+        background-color: var(--crystal);
+        flex: 2;
+        padding: 15px;
+      }
+
+      .stream {
+        background-color: var(--cornsilk);
+        clip-path: polygon(0 0, var(--reverse-arrow-depth) 0, 100% 50%, var(--reverse-arrow-depth) 100%, 0 100%);
+        flex: 1;
+        padding: 15px;
+        padding-right: var(--arrow-width);
+        margin: 15px 0;
+      }
+
+      .stream.stream-reversed {
+        clip-path: polygon(0 50%, var(--arrow-depth) 0, 100% 0, 100% 100%, var(--arrow-depth) 100%);
+        padding-left: var(--arrow-width);
+      }
+
+      dt {
+        font-weight: bold;
+      }
+
+    </style>
   </head>
   <body>
-    <dl>
-      <dt>Proxy Request Protocol</dt>
-      <dd>{{ .ProxyResponse.RequestProtocol }}</dd>
-
-      <dt>Server Request Protocol</dt>
-      <dd>{{ .ServerResponse.RequestProtocol }}</dd>
-
-      <dt>Client Response Code</dt>
-      <dd>{{ .ResponseCode }}</dd>
-
-      <dt>Client Response Protocol</dt>
-      <dd>{{ .ResponseProtocol }}</dd>
-    </dl>
+    <div class="container">
+      <div class="column client">
+        Client
+      </div>
+      <div class="column connection">
+        <div class="stream">
+          <h4>Client Request</h4>
+          <dl>
+            <dt>Protocol</dt>
+            <dd>{{ .ProxyResponse.RequestProtocol }}</dd>
+          </dl>
+        </div>
+        <div class="stream stream-reversed">
+          <h4>Proxy Response</h4>
+          <dl>
+            <dt>Protocol</dt>
+            <dd>{{ .ResponseProtocol }}</dd>
+            <dt>Code</dt>
+            <dd>{{ .ResponseCode }}</dd>
+          </dl>
+        </div>
+      </div>
+      <div class="column proxy">
+        Proxy
+      </div>
+      <div class="column connection">
+        <div class="stream">
+          <h4>Proxy Request</h4>
+          <dl>
+            <dt>Protocol</dt>
+            <dd>{{ .ServerResponse.RequestProtocol }}</dd>
+          </dl>
+        </div>
+        <div class="stream stream-reversed">
+          <h4>Server Response</h4>
+        </div>
+      </div>
+      <div class="column server">
+        Server
+      </div>
+    </div>
   </body>
 </html>
