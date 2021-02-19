@@ -20,7 +20,7 @@ import (
 )
 
 type startable interface {
-	start(*sync.WaitGroup)
+	Start(*sync.WaitGroup)
 }
 
 type Http2Server struct{ Port string }
@@ -63,6 +63,10 @@ type ProxyResponse struct {
 
 type ServerResponse struct {
 	RequestProtocol string `json:"protocol"`
+}
+
+type Configuration struct {
+	ClientUseHttp2 bool
 }
 
 type ViewData struct {
@@ -112,21 +116,17 @@ func main() {
 
 	waitGroup.Add(len(startables))
 	for _, aStartable := range startables {
-		go aStartable.start(&waitGroup)
+		go aStartable.Start(&waitGroup)
 	}
 
 	waitGroup.Wait()
 }
 
-func (this Ui) start(waitGroup *sync.WaitGroup) {
+func (this Ui) Start(waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
 
-	err := this.Http2Server.serveHttp("ui", this.handle, false)
-	this.ErrorHandler.handleErr(err, "http2server crashed")
-}
-
-type Configuration struct {
-	ClientUseHttp2 bool
+	err := this.Http2Server.ServeHttp("ui", this.handle, false)
+	this.ErrorHandler.HandleErr(err, "http2server crashed")
 }
 
 func (this Ui) handle(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +142,7 @@ func (this Ui) handle(w http.ResponseWriter, r *http.Request) {
 
 	var clientResponse ClientResponse
 	err := json.Unmarshal(response, &clientResponse)
-	this.ErrorHandler.handleErr(err, "error unmarshalling client response")
+	this.ErrorHandler.HandleErr(err, "error unmarshalling client response")
 
 	viewData := ViewData{
 		ClientResponse: clientResponse,
@@ -166,28 +166,28 @@ func (this Ui) renderTemplate(w http.ResponseWriter, viewData ViewData) {
 	parsedTemplate := template.Must(template.New(templateName).ParseFiles(uiTemplateFile))
 
 	err := parsedTemplate.Execute(w, viewData)
-	this.ErrorHandler.handleErr(err, "error rendering html")
+	this.ErrorHandler.HandleErr(err, "error rendering html")
 }
 
 func (this Ui) makeRequest(url string) []byte {
 	client := &http.Client{}
 
 	resp, err := client.Get(url)
-	this.ErrorHandler.handleErr(err, "failed GET to client")
+	this.ErrorHandler.HandleErr(err, "failed GET to client")
 
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
-	this.ErrorHandler.handleErr(err, "Failed reading client response body")
+	this.ErrorHandler.HandleErr(err, "Failed reading client response body")
 
 	return body
 }
 
-func (this Client) start(waitGroup *sync.WaitGroup) {
+func (this Client) Start(waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
 
-	err := this.Http2Server.serveHttp("client", this.handle, false)
-	this.ErrorHandler.handleErr(err, "http2server crashed")
+	err := this.Http2Server.ServeHttp("client", this.handle, false)
+	this.ErrorHandler.HandleErr(err, "http2server crashed")
 }
 
 func (this Client) handle(w http.ResponseWriter, r *http.Request) {
@@ -205,7 +205,7 @@ func (this Client) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse, err := json.Marshal(clientResponse)
-	this.ErrorHandler.handleErr(err, "failed jsonifying client response")
+	this.ErrorHandler.HandleErr(err, "failed jsonifying client response")
 
 	fmt.Fprint(w, string(jsonResponse))
 }
@@ -226,17 +226,17 @@ func (this Client) makeRequest(url string, useHttp2 bool) *http.Response {
 	var err error
 
 	if useHttp2 {
-		transport, err = this.TransportFactory.buildHttp2Transport()
-		this.ErrorHandler.handleErr(err, "failed building HTTP2 transport")
+		transport, err = this.TransportFactory.BuildHttp2Transport()
+		this.ErrorHandler.HandleErr(err, "failed building HTTP2 transport")
 	} else {
-		transport, err = this.TransportFactory.buildHttp1Transport()
-		this.ErrorHandler.handleErr(err, "failed building HTTP1 transport")
+		transport, err = this.TransportFactory.BuildHttp1Transport()
+		this.ErrorHandler.HandleErr(err, "failed building HTTP1 transport")
 	}
 
 	client.Transport = transport
 
 	response, err := client.Get(url)
-	this.ErrorHandler.handleErr(err, "failed GET to proxy")
+	this.ErrorHandler.HandleErr(err, "failed GET to proxy")
 
 	return response
 }
@@ -245,7 +245,7 @@ func (this Client) parseResponse(proxyResponse *http.Response) (ProxyResponse, S
 	defer proxyResponse.Body.Close()
 
 	body, err := ioutil.ReadAll(proxyResponse.Body)
-	this.ErrorHandler.handleErr(err, "failed reading proxy response body")
+	this.ErrorHandler.HandleErr(err, "failed reading proxy response body")
 
 	splitResponses := bytes.Split(body, []byte(responseBoundary))
 	proxyResponseBody, serverResponseBody := splitResponses[0], splitResponses[1]
@@ -254,19 +254,19 @@ func (this Client) parseResponse(proxyResponse *http.Response) (ProxyResponse, S
 	var parsedServerResponse ServerResponse
 
 	err = json.Unmarshal(proxyResponseBody, &parsedProxyResponse)
-	this.ErrorHandler.handleErr(err, "failed unmarshalling proxy response")
+	this.ErrorHandler.HandleErr(err, "failed unmarshalling proxy response")
 
 	err = json.Unmarshal(serverResponseBody, &parsedServerResponse)
-	this.ErrorHandler.handleErr(err, "failed unmarshalling server response")
+	this.ErrorHandler.HandleErr(err, "failed unmarshalling server response")
 
 	return parsedProxyResponse, parsedServerResponse
 }
 
-func (this Proxy) start(waitGroup *sync.WaitGroup) {
+func (this Proxy) Start(waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
 
-	err := this.Http2Server.serveHttp("proxy", this.handle, true)
-	this.ErrorHandler.handleErr(err, "http2server crashed")
+	err := this.Http2Server.ServeHttp("proxy", this.handle, true)
+	this.ErrorHandler.HandleErr(err, "http2server crashed")
 }
 
 func (this Proxy) handle(w http.ResponseWriter, r *http.Request) {
@@ -274,7 +274,7 @@ func (this Proxy) handle(w http.ResponseWriter, r *http.Request) {
 		RequestProtocol: r.Proto,
 	}
 	jsonResponse, err := json.Marshal(response)
-	this.ErrorHandler.handleErr(err, "failed jsonifying proxy response")
+	this.ErrorHandler.HandleErr(err, "failed jsonifying proxy response")
 
 	fmt.Fprint(w, string(jsonResponse))
 	fmt.Fprint(w, responseBoundary)
@@ -289,19 +289,19 @@ func (this Proxy) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	proxy := &httputil.ReverseProxy{Director: director}
-	transport, err := this.TransportFactory.buildHttp2Transport()
-	this.ErrorHandler.handleErr(err, "failed building TLS transport")
+	transport, err := this.TransportFactory.BuildHttp2Transport()
+	this.ErrorHandler.HandleErr(err, "failed building TLS transport")
 
 	proxy.Transport = transport
 
 	proxy.ServeHTTP(w, r)
 }
 
-func (this Server) start(waitGroup *sync.WaitGroup) {
+func (this Server) Start(waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
 
-	err := this.Http2Server.serveHttp("server", this.handle, true)
-	this.ErrorHandler.handleErr(err, "http2server crashed")
+	err := this.Http2Server.ServeHttp("server", this.handle, true)
+	this.ErrorHandler.HandleErr(err, "http2server crashed")
 }
 
 func (this Server) handle(w http.ResponseWriter, r *http.Request) {
@@ -309,12 +309,12 @@ func (this Server) handle(w http.ResponseWriter, r *http.Request) {
 		RequestProtocol: r.Proto,
 	}
 	jsonResponse, err := json.Marshal(response)
-	this.ErrorHandler.handleErr(err, "failed jsonifying server response")
+	this.ErrorHandler.HandleErr(err, "failed jsonifying server response")
 
 	fmt.Fprint(w, string(jsonResponse))
 }
 
-func (this Http2Server) serveHttp(name string, handler http.HandlerFunc, tls bool) (err error) {
+func (this Http2Server) ServeHttp(name string, handler http.HandlerFunc, tls bool) (err error) {
 	srv := &http.Server{Addr: this.Port, Handler: http.HandlerFunc(handler)}
 
 	var scheme string
@@ -334,11 +334,11 @@ func (this Http2Server) serveHttp(name string, handler http.HandlerFunc, tls boo
 	return
 }
 
-func (this TransportFactory) buildHttp2Transport() (http.RoundTripper, error) {
+func (this TransportFactory) BuildHttp2Transport() (http.RoundTripper, error) {
 	return this.buildTransport(Http2)
 }
 
-func (this TransportFactory) buildHttp1Transport() (http.RoundTripper, error) {
+func (this TransportFactory) BuildHttp1Transport() (http.RoundTripper, error) {
 	return this.buildTransport(Http1)
 }
 
@@ -366,7 +366,7 @@ func (this TransportFactory) buildTransport(httpVersion HttpVersion) (http.Round
 	return transport, nil
 }
 
-func (this ErrorHandler) handleErr(err error, errorMessage string) {
+func (this ErrorHandler) HandleErr(err error, errorMessage string) {
 	if err != nil {
 		log.Fatalf("%s: %s: %s", this.Prefix, errorMessage, err)
 	}
